@@ -1,0 +1,39 @@
+# Virtual Environment
+.venv/
+venv/
+env/
+
+# Build and Distribution
+build/
+dist/
+*.spec
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Dependencies cache
+*.pyc
+
+# Optional directories
+original code/
+downloadfromx/
+Duplifiles/

@@ -1,0 +1,5 @@
+{
+    "pythonVersion": "3.12",
+    "pythonPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+    "venvPath": "${workspaceFolder}"
+}
