@@ -117,13 +117,16 @@ class App1(ctk.CTkFrame):
         def convert_video_task(file_path):
             output_file = os.path.splitext(file_path)[0] + ".mp4"
             print(f"Converting {file_path} to {output_file}")
-            video = VideoFileClip(file_path)  # type: ignore
-            video.write_videofile(output_file, codec="libx264", verbose=False, logger=None)  # type: ignore
-            video.close()
-            os.remove(file_path)
+            try:
+                video = VideoFileClip(file_path)  # type: ignore
+                video.write_videofile(output_file, codec="libx264", verbose=False, logger=None)  # type: ignore
+                video.close()
+                os.remove(file_path)
+            except Exception as e:
+                print(f"Error converting {file_path}: {e}")
             with self.progress_lock:
                 self.progress["value"] += 1
-                self.update_idletasks()
+                self.after(0, self.update_idletasks)
         
         with ThreadPoolExecutor(max_workers=10) as executor:
             list(executor.map(convert_video_task, files))
@@ -138,12 +141,15 @@ class App1(ctk.CTkFrame):
         def convert_image_task(file_path):
             output_file = os.path.splitext(file_path)[0] + ".jpg"
             print(f"Converting {file_path} to {output_file}")
-            image = Image.open(file_path).convert("RGB")
-            image.save(output_file, "JPEG")
-            os.remove(file_path)
+            try:
+                image = Image.open(file_path).convert("RGB")
+                image.save(output_file, "JPEG")
+                os.remove(file_path)
+            except Exception as e:
+                print(f"Error converting {file_path}: {e}")
             with self.progress_lock:
                 self.progress["value"] += 1
-                self.update_idletasks()
+                self.after(0, self.update_idletasks)
         
         with ThreadPoolExecutor(max_workers=10) as executor:
             list(executor.map(convert_image_task, files))
@@ -274,6 +280,9 @@ class App3(ctk.CTkFrame):
 
     def rename_duplicate_files(self, source_folder, target_folder):
         files = [os.path.join(source_folder, file) for file in os.listdir(source_folder) if os.path.isfile(os.path.join(source_folder, file))]
+        if not files:
+            print("No files found in source folder.")
+            return
         self.progress["maximum"] = len(files)
         self.progress["value"] = 0
         target_filenames = {os.path.splitext(file)[0].lower(): file for file in os.listdir(target_folder) if os.path.isfile(os.path.join(target_folder, file))}
@@ -282,26 +291,32 @@ class App3(ctk.CTkFrame):
             name, extension = os.path.splitext(os.path.basename(file_path))
             name_lower = name.lower()
 
-            if name_lower in target_filenames:
-                new_filename = generate_unique_filename(name, extension, target_filenames.keys())
-                new_filepath = os.path.join(source_folder, new_filename)
-                os.rename(file_path, new_filepath)
-                print(f"Renamed '{file_path}' to '{new_filepath}'.")
-                with self.progress_lock:
-                    target_filenames[name_lower] = new_filename
+            with self.progress_lock:
+                if name_lower in target_filenames:
+                    new_filename = generate_unique_filename(name, extension, target_filenames)
+                    new_filepath = os.path.join(source_folder, new_filename)
+                    try:
+                        os.rename(file_path, new_filepath)
+                        print(f"Renamed '{file_path}' to '{new_filepath}'.")
+                        target_filenames[name_lower] = new_filename
+                    except Exception as e:
+                        print(f"Failed to rename '{file_path}': {e}")
             
             with self.progress_lock:
                 self.progress["value"] += 1
-                self.update_idletasks()
+                self.after(0, self.update_idletasks)
         
         with ThreadPoolExecutor(max_workers=10) as executor:
             list(executor.map(rename_file_task, files))
 
 def generate_unique_filename(base_name, extension, existing_names):
-    rng1 = random.randint(1, 10000)
-    rng2 = random.randint(1, 10000)
-    new_name = f"{base_name}_{rng1}{rng2}{extension}"
-    return new_name
+    counter = 1
+    while True:
+        new_name = f"{base_name}_{counter}{extension}"
+        # Check if the base name (without extension) already exists
+        if os.path.splitext(new_name)[0].lower() not in existing_names:
+            return new_name
+        counter += 1
 
 # Define App 4
 class App4(ctk.CTkFrame):
@@ -374,9 +389,10 @@ class App4(ctk.CTkFrame):
             if file_hash:
                 hashes[file_hash].append(file_path)
             with self.progress_lock:
-                self.progress["value"] += 1
-                self.status_label.configure(text=f"Processed {self.progress['value']}/{len(all_files)} files")
-                self.update_idletasks()
+                current_progress = self.progress["value"] = self.progress["value"] + 1
+                status_text = f"Processed {current_progress}/{len(all_files)} files"
+                self.after(0, lambda: self.status_label.configure(text=status_text))
+                self.after(0, self.update_idletasks)
         
         with ThreadPoolExecutor(max_workers=10) as executor:
             list(executor.map(hash_file_task, all_files))
