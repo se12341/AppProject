@@ -279,44 +279,52 @@ class App3(ctk.CTkFrame):
         self.button.configure(text="Replacing File Names")  # Update button3 text
 
     def rename_duplicate_files(self, source_folder, target_folder):
-        files = [os.path.join(source_folder, file) for file in os.listdir(source_folder) if os.path.isfile(os.path.join(source_folder, file))]
-        if not files:
+        # Collect all files from source (including subfolders)
+        source_files = []
+        for root, _, files in os.walk(source_folder):
+            for file in files:
+                source_files.append(os.path.join(root, file))
+        
+        if not source_files:
             print("No files found in source folder.")
             return
-        self.progress["maximum"] = len(files)
+        
+        # Collect all target filenames (including subfolders)
+        target_filenames = set()
+        for root, _, files in os.walk(target_folder):
+            for file in files:
+                target_filenames.add(os.path.splitext(file)[0].lower())
+        
+        self.progress["maximum"] = len(source_files)
         self.progress["value"] = 0
-        target_filenames = {os.path.splitext(file)[0].lower(): file for file in os.listdir(target_folder) if os.path.isfile(os.path.join(target_folder, file))}
 
         def rename_file_task(file_path):
             name, extension = os.path.splitext(os.path.basename(file_path))
             name_lower = name.lower()
 
-            with self.progress_lock:
-                if name_lower in target_filenames:
-                    new_filename = generate_unique_filename(name, extension, target_filenames)
-                    new_filepath = os.path.join(source_folder, new_filename)
-                    try:
-                        os.rename(file_path, new_filepath)
-                        print(f"Renamed '{file_path}' to '{new_filepath}'.")
-                        target_filenames[name_lower] = new_filename
-                    except Exception as e:
-                        print(f"Failed to rename '{file_path}': {e}")
+            # Check if name exists in target
+            if name_lower in target_filenames:
+                counter = 1
+                while True:
+                    new_name = f"{name}_{counter}{extension}"
+                    if os.path.splitext(new_name)[0].lower() not in target_filenames:
+                        break
+                    counter += 1
+                
+                new_filepath = os.path.join(os.path.dirname(file_path), new_name)
+                try:
+                    os.rename(file_path, new_filepath)
+                    print(f"Renamed '{file_path}' to '{new_filepath}'.")
+                except Exception as e:
+                    print(f"Failed to rename '{file_path}': {e}")
             
+            # Update progress outside the lock
             with self.progress_lock:
                 self.progress["value"] += 1
-                self.after(0, self.update_idletasks)
+            self.after(0, self.update_idletasks)
         
         with ThreadPoolExecutor(max_workers=10) as executor:
-            list(executor.map(rename_file_task, files))
-
-def generate_unique_filename(base_name, extension, existing_names):
-    counter = 1
-    while True:
-        new_name = f"{base_name}_{counter}{extension}"
-        # Check if the base name (without extension) already exists
-        if os.path.splitext(new_name)[0].lower() not in existing_names:
-            return new_name
-        counter += 1
+            list(executor.map(rename_file_task, source_files))
 
 # Define App 4
 class App4(ctk.CTkFrame):
