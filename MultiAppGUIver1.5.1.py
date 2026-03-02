@@ -1,4 +1,5 @@
 import sys
+import subprocess
 import tkinter as tk
 from tkinter import ttk
 import customtkinter as ctk
@@ -10,15 +11,20 @@ from collections import defaultdict
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-# When running as a PyInstaller frozen exe, point imageio/moviepy to the
-# bundled ffmpeg binary that lives in sys._MEIPASS/imageio_ffmpeg/binaries/
-if getattr(sys, 'frozen', False):
-    _binaries_dir = os.path.join(sys._MEIPASS, 'imageio_ffmpeg', 'binaries')
-    _ffmpeg_candidates = [f for f in os.listdir(_binaries_dir) if f.startswith('ffmpeg') and f.endswith('.exe')] if os.path.isdir(_binaries_dir) else []
-    if _ffmpeg_candidates:
-        os.environ['IMAGEIO_FFMPEG_EXE'] = os.path.join(_binaries_dir, _ffmpeg_candidates[0])
-
-from moviepy import VideoFileClip
+def get_ffmpeg_path() -> str:
+    """Return the ffmpeg executable path, whether frozen or running from source."""
+    if getattr(sys, 'frozen', False):
+        binaries_dir = os.path.join(sys._MEIPASS, 'imageio_ffmpeg', 'binaries')
+        if os.path.isdir(binaries_dir):
+            for f in os.listdir(binaries_dir):
+                if f.startswith('ffmpeg') and f.endswith('.exe'):
+                    return os.path.join(binaries_dir, f)
+    # Fallback: use imageio_ffmpeg (works when running from source)
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return 'ffmpeg'
 
 
 # Create the main application window
@@ -86,79 +92,83 @@ class App1(ctk.CTkFrame):
         super().__init__(parent)
         self.progress_lock = threading.Lock()
         label = ctk.CTkLabel(self, text="Welcome to Web2Real!", font=("Arial", 25))
-        label.place(y= -150, relx=0.5, rely=0.5, anchor="center")
+        label.place(y=-150, relx=0.5, rely=0.5, anchor="center")
 
-        # Button for "Do Something" in App 1
         self.button = ctk.CTkButton(self, text="Replace Files", command=self.on_click1)
-        self.button.place(y= -100, relx=0.5, rely=0.7, anchor="center")
+        self.button.place(y=-100, relx=0.5, rely=0.7, anchor="center")
 
-        # Path dir
         self.path_var = tk.StringVar()
         self.path = ctk.CTkEntry(self, width=350, height=40, textvariable=self.path_var)
-        self.path.pack(side="bottom", expand=True, anchor = "s", pady = 75)
+        self.path.pack(side="bottom", expand=True, anchor="s", pady=75)
 
-        # Progress bar (hidden by default)
+        self.status_label = ctk.CTkLabel(self, text="", font=("Arial", 11))
+        self.status_label.pack(side="bottom", pady=(0, 5))
+
         self.progress = ttk.Progressbar(self, orient="horizontal", length=300, mode="determinate")
 
     def on_click1(self):
-        # Show progress bar
         self.progress.pack(side="top", pady=10)
         pathget = self.path.get()
         if not os.path.isdir(pathget):
-            print("The specified path does not exist or is not a directory.")
+            self.status_label.configure(text="Invalid path.")
             return
-        # Run in background thread
+        self.button.configure(state="disabled")
+        self.status_label.configure(text="Working...")
         thread = threading.Thread(target=self.process_conversion, args=(pathget,), daemon=True)
         thread.start()
 
     def process_conversion(self, pathget):
         self.convert_videos(pathget)
         self.convert_images(pathget)
+        self.after(0, lambda: self.button.configure(state="normal", text="Done!"))
+        self.after(0, lambda: self.status_label.configure(text="All files converted."))
 
     def convert_videos(self, pathget):
-        files = [os.path.join(root, file) for root, _, files in os.walk(pathget) for file in files if file.endswith(".webm")]
+        files = [os.path.join(root, f) for root, _, fs in os.walk(pathget) for f in fs if f.lower().endswith(".webm")]
         if not files:
             return
-        self.progress["maximum"] = len(files)
-        self.progress["value"] = 0
-        
+        ffmpeg = get_ffmpeg_path()
+        self.after(0, lambda: self.progress.configure(maximum=len(files), value=0))
+
         def convert_video_task(file_path):
             output_file = os.path.splitext(file_path)[0] + ".mp4"
-            print(f"Converting {file_path} to {output_file}")
             try:
-                video = VideoFileClip(file_path)  # type: ignore
-                video.write_videofile(output_file, codec="libx264", verbose=False, logger=None)  # type: ignore
-                video.close()
-                os.remove(file_path)
+                result = subprocess.run(
+                    [ffmpeg, "-y", "-i", file_path, "-c:v", "libx264", "-c:a", "aac", output_file],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                )
+                if result.returncode == 0:
+                    os.remove(file_path)
+                else:
+                    err = result.stderr.decode(errors="replace").strip().splitlines()[-1] if result.stderr else "unknown error"
+                    self.after(0, lambda e=err: self.status_label.configure(text=f"Error: {e}"))
             except Exception as e:
-                print(f"Error converting {file_path}: {e}")
+                self.after(0, lambda e=e: self.status_label.configure(text=f"Error: {e}"))
             with self.progress_lock:
-                self.progress["value"] += 1
-                self.after(0, self.update_idletasks)
-        
-        with ThreadPoolExecutor(max_workers=10) as executor:
+                self.after(0, lambda: self.progress.step(1))
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
             list(executor.map(convert_video_task, files))
 
     def convert_images(self, pathget):
-        files = [os.path.join(root, file) for root, _, files in os.walk(pathget) for file in files if file.endswith(".webp")]
+        files = [os.path.join(root, f) for root, _, fs in os.walk(pathget) for f in fs if f.lower().endswith(".webp")]
         if not files:
             return
-        self.progress["maximum"] = len(files)
-        self.progress["value"] = 0
-        
+        self.after(0, lambda: self.progress.configure(maximum=len(files), value=0))
+
         def convert_image_task(file_path):
             output_file = os.path.splitext(file_path)[0] + ".jpg"
-            print(f"Converting {file_path} to {output_file}")
             try:
                 image = Image.open(file_path).convert("RGB")
                 image.save(output_file, "JPEG")
                 os.remove(file_path)
             except Exception as e:
-                print(f"Error converting {file_path}: {e}")
+                self.after(0, lambda e=e: self.status_label.configure(text=f"Error: {e}"))
             with self.progress_lock:
-                self.progress["value"] += 1
-                self.after(0, self.update_idletasks)
-        
+                self.after(0, lambda: self.progress.step(1))
+
         with ThreadPoolExecutor(max_workers=10) as executor:
             list(executor.map(convert_image_task, files))
 
