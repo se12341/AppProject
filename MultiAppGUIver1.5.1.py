@@ -1,16 +1,24 @@
+import sys
 import tkinter as tk
 from tkinter import ttk
 import customtkinter as ctk
 import os
-from moviepy import VideoFileClip
 from PIL import Image
 import shutil
-import random
 import hashlib
-import json
 from collections import defaultdict
 import threading
 from concurrent.futures import ThreadPoolExecutor
+
+# When running as a PyInstaller frozen exe, point imageio/moviepy to the
+# bundled ffmpeg binary that lives in sys._MEIPASS/imageio_ffmpeg/binaries/
+if getattr(sys, 'frozen', False):
+    _binaries_dir = os.path.join(sys._MEIPASS, 'imageio_ffmpeg', 'binaries')
+    _ffmpeg_candidates = [f for f in os.listdir(_binaries_dir) if f.startswith('ffmpeg') and f.endswith('.exe')] if os.path.isdir(_binaries_dir) else []
+    if _ffmpeg_candidates:
+        os.environ['IMAGEIO_FFMPEG_EXE'] = os.path.join(_binaries_dir, _ffmpeg_candidates[0])
+
+from moviepy import VideoFileClip
 
 
 # Create the main application window
